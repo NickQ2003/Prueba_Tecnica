@@ -121,15 +121,6 @@ dcurl -i "$MOCK_API_URL/api/v1/parties?limit=20&offset=0&search=Demo" \
 
 Esperado: `200 OK`, respuesta paginada con `items`, `limit`, `offset` y `total`.
 
-Buscar Parties para seleccionar tomador, tenant y landlord (`GET /api/v1/parties`):
-
-```bash
-dcurl -i "$MOCK_API_URL/api/v1/parties?limit=20&offset=0&search=Demo" \
-  -H "Authorization: Bearer $API_READ_TOKEN"
-```
-
-Esperado: `200 OK`, respuesta paginada con `items`, `limit`, `offset` y `total`.
-
 Crear una póliza individual con una solicitud contractual (`POST /api/v1/policies`):
 
 ```bash
