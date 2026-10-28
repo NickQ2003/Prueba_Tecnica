@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f1eee7" />
+    <meta
+      name="description"
+      content="Consola sencilla para operar pólizas de arrendamiento y consultar operaciones duraderas."
+    />
+    <title>Arrenda — control de pólizas</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Arrenda, inicio">
+          <span class="brand-mark" aria-hidden="true">A</span>
+          <span class="brand-copy"><strong>arrenda</strong><small>OPERACIONES</small></span>
+        </a>
+        <div class="topbar-status">
+          <span class="status-dot" id="api-dot"></span>
+          <span id="api-status">Conectando con la API</span>
+        </div>
+        <div class="topbar-actions">
+          <button class="button button-quiet" id="refresh-button" type="button">
+            <span aria-hidden="true">↻</span> Actualizar
+          </button>
+          <button class="button button-dark" id="token-button" type="button">Token API</button>
+        </div>
+      </header>
+
+      <main>
+        <section class="intro">
+          <div>
+            <p class="eyebrow">PANEL DE CONTROL <span> / </span> DEMO</p>
+            <h1>Pólizas, <em>sin perder el hilo.</em></h1>
+            <p class="intro-copy">
+              Consulta contratos, gestiona riesgos y sigue cada solicitud hasta la confirmación del CORE.
+            </p>
+          </div>
+          <div class="intro-actions">
+            <button class="button button-rust" id="new-policy-button" type="button">＋ Nueva póliza</button>
+            <button class="button button-outline" id="new-party-button" type="button">＋ Party</button>
+          </div>
+        </section>
+
+        <section class="summary-grid" aria-label="Resumen">
+          <article class="summary-card summary-card-featured">
+            <span class="summary-label">PÓLIZAS VISIBLES</span>
+            <strong id="policy-count">—</strong>
+            <span class="summary-note" id="policy-count-note">En el portafolio actual</span>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">INDIVIDUALES</span>
+            <strong id="individual-count">—</strong>
+            <span class="summary-note">Un riesgo activo por póliza</span>
+          </article>
+          <article class="summary-card">
+            <span class="summary-label">COLECTIVAS</span>
+            <strong id="collective-count">—</strong>
+            <span class="summary-note">Riesgos agrupados por tomador</span>
+          </article>
+          <article class="summary-card summary-card-operations">
+            <span class="summary-label">EN SEGUIMIENTO</span>
+            <strong id="operation-count">0</strong>
+            <span class="summary-note">Operaciones en esta sesión</span>
+          </article>
+        </section>
+
+        <section class="workspace">
+          <aside class="panel policy-panel" aria-labelledby="policies-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">PORTAFOLIO</p>
+                <h2 id="policies-title">Pólizas</h2>
+              </div>
+              <button class="icon-button" id="policy-reload" type="button" aria-label="Actualizar pólizas">↻</button>
+            </div>
+            <label class="field-label" for="policy-search">Buscar</label>
+            <input class="text-input" id="policy-search" type="search" placeholder="Número o tipo" />
+            <label class="field-label" for="policy-filter">Tipo</label>
+            <select class="text-input" id="policy-filter">
+              <option value="">Todas</option>
+              <option value="INDIVIDUAL">Individual</option>
+              <option value="COLLECTIVE">Colectiva</option>
+            </select>
+            <div class="policy-list" id="policy-list" aria-live="polite">
+              <div class="loading-state">Cargando pólizas…</div>
+            </div>
+            <p class="panel-footnote">Ordenadas por creación. La lista muestra hasta 100 registros.</p>
+          </aside>
+
+          <section class="panel detail-panel" id="policy-detail" aria-live="polite" aria-label="Detalle de póliza">
+            <div class="empty-state">
+              <div class="empty-mark" aria-hidden="true">↗</div>
+              <p class="eyebrow">DETALLE</p>
+              <h2>Selecciona una póliza</h2>
+              <p>Elige un registro del portafolio para ver riesgos, periodos y acciones disponibles.</p>
+            </div>
+          </section>
+        </section>
+
+        <section class="lower-grid">
+          <section class="panel operations-panel" aria-labelledby="operations-title">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">TRAZABILIDAD</p>
+                <h2 id="operations-title">Operaciones</h2>
+              </div>
+              <span class="count-pill" id="operations-pill">0</span>
+            </div>
+            <form class="operation-lookup" id="operation-lookup-form">
+              <label class="sr-only" for="operation-id-input">ID de operación</label>
+              <input class="text-input" id="operation-id-input" type="text" placeholder="Pega un operation_id" />
+              <button class="button button-dark" type="submit">Consultar</button>
+            </form>
+            <div class="operation-list" id="operation-list" aria-live="polite">
+              <div class="quiet-state">Las solicitudes nuevas aparecerán aquí.</div>
+            </div>
+          </section>
+
+          <section class="panel directory-panel" aria-labelledby="directory-title">
+            <div class="panel-heading directory-heading">
+              <div>
+                <p class="eyebrow">DATOS AUXILIARES</p>
+                <h2 id="directory-title">Parties e IPC</h2>
+              </div>
+              <div class="segmented" role="tablist" aria-label="Datos auxiliares">
+                <button class="segment is-active" type="button" data-directory="parties" role="tab" aria-selected="true">Parties</button>
+                <button class="segment" type="button" data-directory="rates" role="tab" aria-selected="false">IPC</button>
+              </div>
+            </div>
+            <div id="directory-content" aria-live="polite"></div>
+          </section>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>ARRENDA <span class="footer-divider">/</span> DEMO LOCAL</span>
+        <span>202 Accepted significa solicitud persistida, no contrato confirmado.</span>
+      </footer>
+    </div>
+
+    <dialog class="modal" id="token-modal">
+      <form id="token-form" class="modal-card">
+        <div class="modal-heading">
+          <div><p class="eyebrow">ACCESO DEMO</p><h2>Token de API</h2></div>
+          <button class="icon-button" type="button" data-close="token-modal" aria-label="Cerrar">×</button>
+        </div>
+        <p class="modal-copy">Usa el token de lectura, operación o revisión definido en `.env`. Se guarda solo en esta sesión del navegador.</p>
+        <label class="field-label" for="token-value">Bearer token</label>
+        <input class="text-input" id="token-value" type="password" autocomplete="off" required />
+        <div class="modal-actions">
+          <button class="button button-quiet" type="button" data-close="token-modal">Cancelar</button>
+          <button class="button button-dark" type="submit">Guardar token</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal modal-wide" id="party-modal">
+      <form id="party-form" class="modal-card">
+        <div class="modal-heading">
+          <div><p class="eyebrow">DIRECTORIO</p><h2>Nueva Party</h2></div>
+          <button class="icon-button" type="button" data-close="party-modal" aria-label="Cerrar">×</button>
+        </div>
+        <div class="form-grid">
+          <label><span class="field-label">Tipo</span><select class="text-input" name="party_type"><option value="PERSON">Persona</option><option value="ORGANIZATION">Organización</option></select></label>
+          <label><span class="field-label">Nombre visible</span><input class="text-input" name="display_name" required maxlength="160" placeholder="Nombre ficticio" /></label>
+          <label class="full-field"><span class="field-label">Referencia de documento</span><input class="text-input" name="document_reference" required maxlength="80" placeholder="DEMO-PERSON-007" /></label>
+        </div>
+        <div class="modal-actions">
+          <button class="button button-quiet" type="button" data-close="party-modal">Cancelar</button>
+          <button class="button button-rust" type="submit">Crear Party</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal modal-wide" id="policy-modal">
+      <form id="policy-form" class="modal-card">
+        <div class="modal-heading">
+          <div><p class="eyebrow">NUEVA SOLICITUD</p><h2>Crear póliza</h2></div>
+          <button class="icon-button" type="button" data-close="policy-modal" aria-label="Cerrar">×</button>
+        </div>
+        <p class="modal-copy">La solicitud se guarda primero y queda pendiente de confirmación asíncrona del CORE.</p>
+        <div class="form-grid">
+          <label><span class="field-label">Tipo de póliza</span><select class="text-input" id="policy-type" name="policy_type"><option value="INDIVIDUAL">Individual</option><option value="COLLECTIVE">Colectiva</option></select></label>
+          <label><span class="field-label">Tomador</span><select class="text-input party-select" id="policy-holder" name="holder_party_id" required></select></label>
+          <label><span class="field-label">Inicio</span><input class="text-input" name="starts_on" id="policy-start" type="date" required /></label>
+          <label><span class="field-label">Vigencia (meses)</span><input class="text-input" name="duration_months" type="number" min="1" max="36" value="12" required /></label>
+        </div>
+        <div class="risk-editor-heading">
+          <div><p class="eyebrow">RIESGO / INMUEBLE</p><h3>Riesgos iniciales</h3></div>
+          <button class="button button-quiet button-small" id="add-risk-row" type="button">＋ Añadir riesgo</button>
+        </div>
+        <div class="risk-editor-list" id="risk-editor-list"></div>
+        <p class="panel-footnote">Individual requiere exactamente un riesgo. Colectiva requiere al menos uno. Importes en COP.</p>
+        <div class="modal-actions">
+          <button class="button button-quiet" type="button" data-close="policy-modal">Cancelar</button>
+          <button class="button button-rust" type="submit">Enviar solicitud</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal modal-wide" id="risk-modal">
+      <form id="risk-form" class="modal-card">
+        <div class="modal-heading">
+          <div><p class="eyebrow">RIESGOS</p><h2>Añadir riesgo</h2></div>
+          <button class="icon-button" type="button" data-close="risk-modal" aria-label="Cerrar">×</button>
+        </div>
+        <p class="modal-copy" id="risk-policy-caption"></p>
+        <div class="form-grid">
+          <label class="full-field"><span class="field-label">Dirección del inmueble</span><input class="text-input" name="property_address" required maxlength="240" /></label>
+          <label><span class="field-label">Arrendatario / tenant</span><select class="text-input party-select" name="tenant_party_id" required></select></label>
+          <label><span class="field-label">Arrendador / landlord</span><select class="text-input party-select" name="landlord_party_id" required></select></label>
+          <label><span class="field-label">Canon mensual (COP)</span><input class="text-input" name="monthly_rent" type="number" min="0.01" step="0.01" required /></label>
+        </div>
+        <p class="panel-footnote">En esta demo las altas solo se aceptan al inicio de un periodo; no se calcula prorrateo.</p>
+        <div class="modal-actions">
+          <button class="button button-quiet" type="button" data-close="risk-modal">Cancelar</button>
+          <button class="button button-rust" type="submit">Enviar solicitud</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="renewal-modal">
+      <form id="renewal-form" class="modal-card">
+        <div class="modal-heading">
+          <div><p class="eyebrow">RENOVACIÓN</p><h2>Solicitar ajuste IPC</h2></div>
+          <button class="icon-button" type="button" data-close="renewal-modal" aria-label="Cerrar">×</button>
+        </div>
+        <p class="modal-copy" id="renewal-policy-caption"></p>
+        <label><span class="field-label">Tasa IPC</span><select class="text-input" name="ipc_rate_id" id="renewal-rate"></select></label>
+        <p class="panel-footnote">“Esperar IPC” deja la operación en `WAITING_INPUT`. No se asume una tasa cero.</p>
+        <div class="modal-actions">
+          <button class="button button-quiet" type="button" data-close="renewal-modal">Cancelar</button>
+          <button class="button button-rust" type="submit">Enviar renovación</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal" id="rate-modal">
+      <form id="rate-form" class="modal-card">
+        <div class="modal-heading">
+          <div><p class="eyebrow">IPC</p><h2>Registrar tasa</h2></div>
+          <button class="icon-button" type="button" data-close="rate-modal" aria-label="Cerrar">×</button>
+        </div>
+        <div class="form-grid">
+          <label><span class="field-label">Periodo de referencia</span><input class="text-input" name="reference_period" required maxlength="20" placeholder="2026-09" /></label>
+          <label><span class="field-label">Vigente desde</span><input class="text-input" name="effective_on" type="date" required /></label>
+          <label><span class="field-label">Tasa (0.08 = 8 %)</span><input class="text-input" name="rate" type="number" min="-0.99999" max="10" step="0.00001" required placeholder="0.08000" /></label>
+          <label><span class="field-label">Fuente</span><input class="text-input" name="source" required maxlength="120" placeholder="Fuente ficticia de demo" /></label>
+          <label class="full-field checkbox-field"><input name="is_fictional" type="checkbox" checked /><span>Marcar como dato ficticio</span></label>
+        </div>
+        <div class="modal-actions">
+          <button class="button button-quiet" type="button" data-close="rate-modal">Cancelar</button>
+          <button class="button button-rust" type="submit">Guardar IPC</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>

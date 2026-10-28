@@ -1,6 +1,6 @@
 # Demo de pólizas de arrendamiento
 
-API FastAPI para pólizas individuales y colectivas. Las ediciones contractuales se procesan como operaciones duraderas y pasan por un CORE HTTP simulado. Docker Compose contiene la aplicación, PostgreSQL, RabbitMQ, workers y una imagen cURL: no hay que instalar Python, una base de datos, el broker ni cURL en el dispositivo.
+Interfaz HTML5 sencilla conectada a una API FastAPI para pólizas individuales y colectivas. Las ediciones contractuales se procesan como operaciones duraderas y pasan por un CORE HTTP simulado. Docker Compose contiene la UI, API, PostgreSQL, RabbitMQ, workers y un cliente cURL: no hay que instalar Python, una base de datos, el broker ni cURL en el dispositivo.
 
 ## En otro dispositivo: instalación desde cero
 
@@ -19,9 +19,17 @@ docker compose up --build -d
 docker compose ps
 ```
 
-La API está disponible en <http://localhost:8080>; Swagger en <http://localhost:8080/docs>. PostgreSQL, RabbitMQ y el CORE mock permanecen dentro de la red de Docker. El mock CORE no se publica al host.
+La interfaz está disponible en <http://localhost:8080>; Swagger en <http://localhost:8080/docs>. PostgreSQL, RabbitMQ y el CORE mock permanecen dentro de la red de Docker. El mock CORE no se publica al host.
 
 Los valores de `.env.example` son ficticios para demo. Para cambiar contraseñas, actualiza tanto la variable de contraseña como su URL de conexión. No compartas ni versionees `.env`.
+
+## Usar la interfaz
+
+Abre <http://localhost:8080>. La pantalla permite crear Parties y pólizas, buscar pólizas, ver riesgos y periodos, añadir o cancelar riesgos, registrar IPC, solicitar renovaciones y consultar/reconciliar operaciones. El botón **Token API** permite cambiar entre los tokens `read`, `operator` y `reviewer` definidos en `.env`.
+
+Una modificación contractual muestra primero `202 · PENDING/PROCESSING`; la interfaz la identifica como solicitud aceptada, no como contrato confirmado. El estado se actualiza desde la operación persistida en PostgreSQL. Si una renovación espera IPC, el panel de operaciones permite seleccionar una tasa y reanudarla con un token reviewer.
+
+La UI y la API comparten origen (`localhost:8080`); no se instala framework ni se habilita CORS.
 
 ## Crear o actualizar la mock data
 
@@ -60,7 +68,8 @@ Todas las llamadas cURL de abajo se ejecutan dentro del contenedor de herramient
 
 ```bash
 dcurl() {
-  docker compose --profile tools run --rm -T curl "$@"
+  docker run --rm --network "${COMPOSE_PROJECT_NAME:-arrenda-demo}_default" \
+    curlimages/curl:8.12.1 "$@"
 }
 ```
 
@@ -102,6 +111,24 @@ dcurl -i -X POST "$MOCK_API_URL/api/v1/parties" \
 ```
 
 Esperado: `201 Created`, con el `id` de la Party.
+
+Listar o buscar Parties (`GET /api/v1/parties`), usado por la interfaz para poblar los selectores:
+
+```bash
+dcurl -i "$MOCK_API_URL/api/v1/parties?limit=20&offset=0&search=Demo" \
+  -H "Authorization: Bearer $API_READ_TOKEN"
+```
+
+Esperado: `200 OK`, respuesta paginada con `items`, `limit`, `offset` y `total`.
+
+Buscar Parties para seleccionar tomador, tenant y landlord (`GET /api/v1/parties`):
+
+```bash
+dcurl -i "$MOCK_API_URL/api/v1/parties?limit=20&offset=0&search=Demo" \
+  -H "Authorization: Bearer $API_READ_TOKEN"
+```
+
+Esperado: `200 OK`, respuesta paginada con `items`, `limit`, `offset` y `total`.
 
 Crear una póliza individual con una solicitud contractual (`POST /api/v1/policies`):
 

@@ -68,6 +68,11 @@ def test_confirmed_change_survives_core_response_timeout_and_reconciles():
         )
         assert tenant.status_code == 201
         assert landlord.status_code == 201
+        listed_parties = client.get(
+            f"/api/v1/parties?search=E2E-T-{suffix}", headers=headers
+        )
+        assert listed_parties.status_code == 200
+        assert listed_parties.json()["total"] == 1
         created = client.post(
             "/api/v1/policies",
             headers={

@@ -2,7 +2,7 @@
 
 ## Objetivo y alcance
 
-Demo backend para gestión de pólizas de arrendamiento individuales y colectivas. El alcance es API, persistencia, operaciones duraderas, renovación con IPC, integración simulada con CORE, notificación/auditoría, Docker, pruebas y documentación. No añadir frontend, pagos, siniestros, facturación, multiempresa o autenticación IAM completa sin requerimiento nuevo.
+Demo para gestión backend de pólizas de arrendamiento individuales y colectivas, con una interfaz estática HTML5 autorizada para operar la demo. El alcance es API, persistencia, operaciones duraderas, renovación con IPC, integración simulada con CORE, notificación/auditoría, Docker, pruebas y documentación. No añadir frameworks frontend, pagos, siniestros, facturación, multiempresa o autenticación IAM completa sin requerimiento nuevo.
 
 ## Arquitectura
 
@@ -31,7 +31,7 @@ Demo backend para gestión de pólizas de arrendamiento individuales y colectiva
 
 ## Servicios y operaciones Docker
 
-- Servicios: `api`, `db`, `rabbitmq`, `worker`, `scheduler`, `outbox-relay`, `migrate`, `core-mock`, `gateway` y cliente `curl`; perfiles `demo`, `tools` y `test`.
+- Servicios: `api`, `web`, `db`, `rabbitmq`, `worker`, `scheduler`, `outbox-relay`, `migrate`, `core-mock`, `gateway` y cliente `curl`; perfiles `demo`, `tools` y `test`.
 - PostgreSQL y RabbitMQ no publican puertos al host; el mock CORE solo se resuelve dentro de Compose.
 - API y procesos de fondo esperan a `migrate` exitoso; las migraciones corren una vez como proceso finito.
 - Scheduler permanece separado y único; no escalarlo junto con la API.
@@ -104,4 +104,4 @@ No declarar que estos comandos pasan sin ejecutarlos en el estado actual del cam
 
 ## Commits
 
-En esta tarea el usuario autorizó commits incrementales con identificadores `PT-001`, `PT-002` en orden ascendente. Usar formato `feat(PT-001): concise lowercase english description` (tipos permitidos `feat`, `fix`, `refactor`, `style`). Nunca hacer push.
+El usuario autorizó commits incrementales con identificadores `PT-001`, `PT-002`, etc. en orden ascendente. Usar formato `feat(PT-001): concise lowercase english description` (tipos permitidos `feat`, `fix`, `refactor`, `style`). Nunca hacer push.

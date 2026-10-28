@@ -19,3 +19,8 @@ htmlcov
 .idea
 .vscode
 docs
+web
+.github
+AGENTS.md
+README.md
+deploy

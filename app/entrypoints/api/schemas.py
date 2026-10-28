@@ -190,5 +190,12 @@ class PaginatedPolicies(BaseModel):
     total: int
 
 
+class PaginatedParties(BaseModel):
+    items: list[PartyRead]
+    limit: int
+    offset: int
+    total: int
+
+
 class DemoScenario(BaseModel):
     scenario: Literal["success", "reject", "unavailable", "slow", "timeout_after_apply", "mismatch"]

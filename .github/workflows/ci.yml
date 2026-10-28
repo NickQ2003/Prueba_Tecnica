@@ -17,6 +17,17 @@ jobs:
         run: >-
           docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test
           up --build --abort-on-container-exit --exit-code-from tests tests
-      - name: Stop test stack without deleting volumes
+      - name: Start the API gateway and static UI
+        run: docker compose -p policies-ui up --build -d gateway
+      - name: Smoke test static assets and same-origin API
+        run: |
+          docker run --rm --network policies-ui_default curlimages/curl:8.12.1 --fail -sS http://gateway:8080/
+          docker run --rm --network policies-ui_default curlimages/curl:8.12.1 --fail -sS http://gateway:8080/app.js
+          docker run --rm --network policies-ui_default curlimages/curl:8.12.1 --fail -sS \
+            -H 'Authorization: Bearer demo-read-token' \
+            'http://gateway:8080/api/v1/parties?limit=1'
+      - name: Stop test stacks without deleting volumes
         if: always()
-        run: docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test down
+        run: |
+          docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test down
+          docker compose -p policies-ui down

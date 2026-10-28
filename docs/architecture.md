@@ -7,6 +7,7 @@ Un solo servicio FastAPI contiene los módulos lógicos de pólizas, riesgos, re
 ```mermaid
 flowchart LR
     Client[Cliente HTTP] --> Gateway[Nginx gateway]
+    Gateway --> Web[HTML5 + CSS + JS]
     Gateway --> API[FastAPI /api/v1]
     API --> UseCases[Aplicación y dominio]
     UseCases --> PG[(PostgreSQL)]

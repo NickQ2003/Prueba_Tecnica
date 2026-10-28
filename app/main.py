@@ -28,6 +28,7 @@ from app.entrypoints.api.schemas import (
     IpcRateRead,
     OperationRead,
     PaginatedPolicies,
+    PaginatedParties,
     PartyCreate,
     PartyRead,
     PeriodRead,
@@ -184,6 +185,34 @@ def metrics() -> Response:
 @app.post("/api/v1/parties", response_model=PartyRead, status_code=201, tags=["parties"])
 def create_party(body: PartyCreate, session: SessionDependency, actor: OperatorActor) -> Party:
     return use_cases.create_party(session, body.model_dump())
+
+
+@app.get("/api/v1/parties", response_model=PaginatedParties, tags=["parties"])
+def list_parties(
+    session: SessionDependency,
+    actor: ReadActor,
+    limit: int = Query(default=20, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    party_type: str | None = Query(default=None, pattern="^(PERSON|ORGANIZATION)$"),
+    search: str | None = Query(default=None, max_length=80),
+) -> PaginatedParties:
+    filters = []
+    if party_type:
+        filters.append(Party.party_type == party_type)
+    if search:
+        term = f"%{search}%"
+        filters.append(
+            Party.display_name.ilike(term) | Party.document_reference.ilike(term)
+        )
+    total = session.scalar(select(func.count()).select_from(Party).where(*filters)) or 0
+    items = session.scalars(
+        select(Party)
+        .where(*filters)
+        .order_by(Party.display_name, Party.id)
+        .limit(limit)
+        .offset(offset)
+    ).all()
+    return PaginatedParties(items=items, limit=limit, offset=offset, total=total)
 
 
 @app.post(
