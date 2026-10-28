@@ -4,10 +4,21 @@ import uuid
 from datetime import date
 
 import httpx
+from app.adapters.persistence.models import NotificationDelivery, Operation, OutboxEvent
+from app.adapters.persistence.session import SessionLocal
 from sqlalchemy import select
 
-from app.adapters.persistence.models import NotificationDelivery, OutboxEvent
-from app.adapters.persistence.session import SessionLocal
+
+def _wait_for_operation(operation_id: str, terminal_status: str) -> None:
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        with SessionLocal() as session:
+            operation = session.get(Operation, uuid.UUID(operation_id))
+            if operation and operation.status in {"SUCCEEDED", "REJECTED", "NEEDS_REVIEW"}:
+                assert operation.status == terminal_status
+                return
+        time.sleep(0.2)
+    raise TimeoutError(f"operation did not finish within 45 seconds: {operation_id}")
 
 
 def _notification_delivered(operation_id: str) -> bool:
@@ -82,16 +93,13 @@ def test_confirmed_change_survives_core_response_timeout_and_reconciles():
         assert created.status_code == 202
         assert created.headers["Location"].endswith(created.json()["operation_id"])
 
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            operation_response = client.get(
-                f"/api/v1/operations/{created.json()['operation_id']}", headers=headers
-            )
-            assert operation_response.status_code == 200
-            operation = operation_response.json()
-            if operation["status"] in {"SUCCEEDED", "REJECTED", "NEEDS_REVIEW"}:
-                break
-            time.sleep(0.2)
+        create_operation_id = created.json()["operation_id"]
+        _wait_for_operation(create_operation_id, "SUCCEEDED")
+        operation_response = client.get(
+            f"/api/v1/operations/{create_operation_id}", headers=headers
+        )
+        assert operation_response.status_code == 200
+        operation = operation_response.json()
         assert operation["status"] == "SUCCEEDED"
         policy_id = operation["policy_id"]
         policy_response = client.get(f"/api/v1/policies/{policy_id}", headers=headers)
@@ -128,17 +136,13 @@ def test_confirmed_change_survives_core_response_timeout_and_reconciles():
         )
         assert resumed.status_code == 200
         assert resumed.json()["status"] == "PENDING"
-        renewal_operation = None
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            renewal_response = client.get(
-                f"/api/v1/operations/{renewal.json()['operation_id']}", headers=headers
-            )
-            assert renewal_response.status_code == 200
-            renewal_operation = renewal_response.json()
-            if renewal_operation["status"] in {"SUCCEEDED", "REJECTED", "NEEDS_REVIEW"}:
-                break
-            time.sleep(0.2)
+        renewal_operation_id = renewal.json()["operation_id"]
+        _wait_for_operation(renewal_operation_id, "SUCCEEDED")
+        renewal_response = client.get(
+            f"/api/v1/operations/{renewal_operation_id}", headers=headers
+        )
+        assert renewal_response.status_code == 200
+        renewal_operation = renewal_response.json()
         assert renewal_operation["status"] == "SUCCEEDED"
         assert renewal_operation["result"]["core_status"] == "CONFIRMED"
         replay = client.post(

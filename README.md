@@ -1,131 +1,339 @@
-# Gestión de pólizas de arrendamiento
+# Demo de pólizas de arrendamiento
 
-Demo de un monolito modular para pólizas individuales y colectivas. Las modificaciones contractuales se aceptan como operaciones persistentes y se confirman de forma asíncrona a través de un adaptador HTTP y un CORE simulado.
+API FastAPI para pólizas individuales y colectivas. Las ediciones contractuales se procesan como operaciones duraderas y pasan por un CORE HTTP simulado. Docker Compose contiene la aplicación, PostgreSQL, RabbitMQ, workers y una imagen cURL: no hay que instalar Python, una base de datos, el broker ni cURL en el dispositivo.
 
-## Alcance y estado
+## En otro dispositivo: instalación desde cero
 
-- **Implementado:** API versionada, pólizas/riesgos/periodos, IPC decimal, idempotencia, reservas por póliza, PostgreSQL/Alembic, Outbox, RabbitMQ/Celery, reconciliación, auditoría y notificación simulada.
-- **Simulado:** CORE HTTP, respuestas de negocio y entrega de notificaciones. El CORE mock persiste sus resultados en un volumen SQLite separado.
-- **Pendiente de contrato real:** WebLogic, su protocolo, capacidades reales de consulta/idempotencia y cualquier proveedor externo de correo/SMS.
-
-No hay un enunciado específico del Módulo 2 en el repositorio. Los supuestos adoptados están en [`docs/assumptions.md`](docs/assumptions.md). La demo local con Docker Compose no ofrece alta disponibilidad ni es una garantía de disponibilidad 24/7.
-
-## Requisitos locales
-
-Solo Docker con Docker Compose v2. No hace falta instalar Python, PostgreSQL, RabbitMQ ni las dependencias de la aplicación en el host.
+Requisitos: Docker Desktop con Docker Compose v2, Git y una terminal Bash (en Windows, Bash de WSL2). El repositorio remoto debe contener estos commits antes de clonarlo; esta tarea no publicó ni hizo `push`.
 
 ```bash
+git clone https://github.com/NickQ2003/Prueba_Tecnica.git
+cd Prueba_Tecnica
 cp .env.example .env
+```
+
+Arranca todos los servicios y espera a sus healthchecks:
+
+```bash
 docker compose up --build -d
 docker compose ps
 ```
 
-Compose levanta gateway Nginx (`localhost:8080`), API, PostgreSQL, RabbitMQ, worker, scheduler, relay Outbox y CORE mock. La API y los procesos de trabajo esperan a que Alembic termine correctamente. PostgreSQL y RabbitMQ no publican puertos en el host; el CORE mock solo está disponible dentro de la red Compose.
+La API está disponible en <http://localhost:8080>; Swagger en <http://localhost:8080/docs>. PostgreSQL, RabbitMQ y el CORE mock permanecen dentro de la red de Docker. El mock CORE no se publica al host.
 
-Swagger: <http://localhost:8080/docs>
+Los valores de `.env.example` son ficticios para demo. Para cambiar contraseñas, actualiza tanto la variable de contraseña como su URL de conexión. No compartas ni versionees `.env`.
 
-OpenAPI: <http://localhost:8080/openapi.json>
+## Crear o actualizar la mock data
 
-Health: <http://localhost:8080/health/live> y <http://localhost:8080/health/ready>
-
-Los tokens de `.env.example` y las credenciales locales son ficticios para demo. Cámbialos antes de exponer el gateway a otra red. No copies secretos a la imagen.
-Si cambias `POSTGRES_PASSWORD` o `RABBITMQ_PASSWORD`, actualiza también su URL de conexión correspondiente en `.env`.
-
-## Datos sintéticos y demo
-
-El seed es idempotente: crea Parties y un IPC ficticio, y encola las pólizas individual y colectiva mediante el caso de uso y el Outbox.
+En Bash, desde la raíz del repositorio y con Compose arriba, carga las variables y ejecuta el script idempotente:
 
 ```bash
-docker compose --profile demo run --rm seed
+set -a
+. ./.env
+set +a
+eval "$(docker compose --profile demo run --rm -T seed python -m scripts.mock_data --shell)"
+export MOCK_API_URL=http://gateway:8080
 ```
 
-Consulta el estado de las operaciones indicadas por el seed con `GET /api/v1/operations/{operation_id}`. Para recorrer una creación y una renovación cuyo CORE aplica pero cuya respuesta se pierde por timeout:
+El script crea Parties sintéticas, una póliza individual, una colectiva con dos riesgos, una tasa IPC ficticia de `0.08000` (8 %) y una operación en `NEEDS_REVIEW`. Espera a que worker y relay procesen las operaciones. No resetea ni borra datos existentes; las IDs quedan cargadas como variables `MOCK_*` en esa terminal.
+
+Ejemplo para ver IDs:
 
 ```bash
-docker compose exec api python -m scripts.demo_flow
+printf '%s\n' "$MOCK_POLICY_INDIVIDUAL_ID" "$MOCK_POLICY_COLLECTIVE_ID" "$MOCK_IPC_RATE_ID" "$MOCK_OPERATION_NEEDS_REVIEW_ID"
 ```
 
-El flujo usa `timeout_after_apply`; consulta el CORE con la misma identidad y no repite la renovación. El resultado esperado imprime ambos estados `SUCCEEDED` y dos periodos. El escenario solo está disponible si `DEMO_CONTROLS_ENABLED=true`.
-
-## API y autenticación demo
-
-Todos los endpoints de negocio requieren `Authorization: Bearer <token>`:
-
-- Lectura: `API_READ_TOKEN` (`demo-read-token` en la demo).
-- Operación: `API_OPERATOR_TOKEN` (`demo-operator-token`).
-- Revisión: `API_REVIEWER_TOKEN` (`demo-reviewer-token`).
-
-Ejemplo de alta de Party:
+Todas las llamadas cURL de abajo se ejecutan dentro del contenedor de herramientas, no requieren cURL en el host:
 
 ```bash
-curl -i http://localhost:8080/api/v1/parties \
-  -H 'Authorization: Bearer demo-operator-token' \
+dcurl() {
+  docker compose --profile tools run --rm -T curl "$@"
+}
+```
+
+Usa `-i` para ver el código HTTP y las cabeceras. Los tokens de demo son `API_READ_TOKEN`, `API_OPERATOR_TOKEN` y `API_REVIEWER_TOKEN`; el `.env.example` trae valores listos para desarrollo.
+
+## cURL de todos los endpoints
+
+### Health, documentación y métricas
+
+```bash
+dcurl -i "$MOCK_API_URL/health/live"
+```
+
+Esperado: `200`, `{"status":"live"}`.
+
+```bash
+dcurl -i "$MOCK_API_URL/health/ready"
+```
+
+Esperado: `200`, `{"status":"ready","database":"ready"}`.
+
+```bash
+dcurl -i "$MOCK_API_URL/openapi.json"
+dcurl -i "$MOCK_API_URL/metrics"
+```
+
+Esperado: `200`; OpenAPI devuelve el contrato y `/metrics` métricas Prometheus agregadas.
+
+### Parties y pólizas
+
+Crear una Party ficticia (`POST /api/v1/parties`):
+
+```bash
+DOC_RUN="$(date +%s)"
+dcurl -i -X POST "$MOCK_API_URL/api/v1/parties" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"party_type":"PERSON","display_name":"Arrendatario Demo","document_reference":"DEMO-LOCAL-001"}'
+  --data-raw "{\"party_type\":\"PERSON\",\"display_name\":\"Persona cURL Demo\",\"document_reference\":\"CURL-PERSON-$DOC_RUN\"}"
 ```
 
-Las pólizas, riesgos, cancelaciones y renovaciones requieren `Idempotency-Key` y devuelven `202 Accepted` con `Location: /api/v1/operations/{id}`. Ese estado confirma que la solicitud quedó persistida, no que el CORE ya haya aplicado el cambio.
+Esperado: `201 Created`, con el `id` de la Party.
 
-Rutas principales: `POST /api/v1/policies`, `GET /api/v1/policies`, `GET /api/v1/policies/{id}`, `PATCH /api/v1/policies/{id}` (solo `notes`), `POST /api/v1/policies/{id}/risks`, cancelación de riesgo, renovación, periodos y estado de operación. Los cambios contractuales deben pasar por el adaptador del CORE.
-
-Si no se proporciona IPC, una renovación queda en `WAITING_INPUT`. Un usuario reviewer registra IPC con `POST /api/v1/ipc-rates` y reanuda la operación con `POST /api/v1/operations/{id}/resume`. El IPC semilla de 8 % es ficticio.
-
-## Migraciones
-
-Las migraciones son la autoridad del esquema. La revisión existente es `001_create_policy_domain.py`; no se debe editar después de aplicar. Para una revisión nueva, con la base local levantada y migrada:
+Crear una póliza individual con una solicitud contractual (`POST /api/v1/policies`):
 
 ```bash
-docker compose --profile tools run --rm --user "$(id -u):$(id -g)" tools \
-  python -m scripts.create_migration add_policy_attribute --autogenerate
-docker compose --profile tools run --rm --user "$(id -u):$(id -g)" tools \
-  python scripts/check_migrations.py
-docker compose --profile tools run --rm --user "$(id -u):$(id -g)" tools alembic check
+DOC_POLICY_KEY="curl-policy-$DOC_RUN"
+dcurl -i -X POST "$MOCK_API_URL/api/v1/policies" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
+  -H "Idempotency-Key: $DOC_POLICY_KEY" \
+  -H 'Content-Type: application/json' \
+  --data-raw "{\"policy_type\":\"INDIVIDUAL\",\"holder_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"starts_on\":\"$(date -u +%F)\",\"duration_months\":12,\"risks\":[{\"property_address\":\"Dirección cURL ficticia\",\"tenant_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"landlord_party_id\":\"$MOCK_PARTY_LANDLORD_ID\",\"monthly_rent\":\"1250000.00\"}]}"
 ```
 
-El helper comprueba una única cadena lineal y asigna el siguiente identificador numérico. Revisa a mano el `upgrade`/`downgrade` autogenerado. Dos ramas de trabajo aún pueden producir el mismo siguiente ID; resuelve esa colisión antes de integrarlas.
+Esperado: `202 Accepted`, con `operation_id` y `Location`. La operación puede estar `PENDING` o `PROCESSING`; copia su ID y consulta el endpoint de operaciones hasta que llegue a estado terminal:
 
-## Tests, lint y migraciones en Docker
+```bash
+DOC_CREATE_OPERATION_ID='<operation_id de la respuesta anterior>'
+dcurl -i "$MOCK_API_URL/api/v1/operations/$DOC_CREATE_OPERATION_ID" \
+  -H "Authorization: Bearer $API_READ_TOKEN"
+```
 
-El perfil de test usa una base PostgreSQL, RabbitMQ y CORE mock con volúmenes aislados del perfil local; incluye API, worker y relay reales para el caso end-to-end.
+Esperado final: `200 OK`, `status: SUCCEEDED` y `result.policy_id`. Un `202` confirma persistencia de la solicitud, no el contrato.
+
+Listar con paginación y filtro (`GET /api/v1/policies`):
+
+```bash
+dcurl -i "$MOCK_API_URL/api/v1/policies?limit=20&offset=0&policy_type=COLLECTIVE" \
+  -H "Authorization: Bearer $API_READ_TOKEN"
+```
+
+Esperado: `200 OK`, con `items`, `limit`, `offset` y `total`.
+
+Consultar una póliza y sus riesgos (`GET /api/v1/policies/{policy_id}`):
+
+```bash
+dcurl -i "$MOCK_API_URL/api/v1/policies/$MOCK_POLICY_INDIVIDUAL_ID" \
+  -H "Authorization: Bearer $API_READ_TOKEN"
+```
+
+Esperado: `200 OK`, póliza con un riesgo activo.
+
+Actualizar notas no contractuales (`PATCH /api/v1/policies/{policy_id}`):
+
+```bash
+dcurl -i -X PATCH "$MOCK_API_URL/api/v1/policies/$MOCK_POLICY_INDIVIDUAL_ID" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"notes":"Actualizada desde cURL"}'
+```
+
+Esperado: `200 OK`; los demás campos internos y contractuales no se pueden cambiar con PATCH.
+
+### Riesgos y cancelación
+
+Listar riesgos (`GET /api/v1/policies/{policy_id}/risks`):
+
+```bash
+dcurl -i "$MOCK_API_URL/api/v1/policies/$MOCK_POLICY_COLLECTIVE_ID/risks" \
+  -H "Authorization: Bearer $API_READ_TOKEN"
+```
+
+Esperado: `200 OK`, dos riesgos `ACTIVE`.
+
+Añadir un tercer riesgo colectivo (`POST /api/v1/policies/{policy_id}/risks`). La mock data comienza su periodo hoy; esta alta demo no aplica prorrateo:
+
+```bash
+dcurl -i -X POST "$MOCK_API_URL/api/v1/policies/$MOCK_POLICY_COLLECTIVE_ID/risks" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
+  -H 'Idempotency-Key: curl-add-risk-001' \
+  -H 'Content-Type: application/json' \
+  --data-raw "{\"property_address\":\"Apartamento cURL ficticio\",\"tenant_party_id\":\"$MOCK_PARTY_TENANT_2_ID\",\"landlord_party_id\":\"$MOCK_PARTY_LANDLORD_2_ID\",\"monthly_rent\":\"900000.00\"}"
+```
+
+Esperado: `202 Accepted`; consulta `Location` hasta `SUCCEEDED` y copia `result.risk_id` si necesitas operar el nuevo riesgo. En pólizas individuales no se permite añadir otro riesgo.
+
+Cancelar un riesgo colectivo (`POST /api/v1/policies/{policy_id}/risks/{risk_id}/cancellations`):
+
+```bash
+dcurl -i -X POST "$MOCK_API_URL/api/v1/policies/$MOCK_POLICY_COLLECTIVE_ID/risks/$MOCK_RISK_COLLECTIVE_1_ID/cancellations" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
+  -H 'Idempotency-Key: curl-cancel-risk-001'
+```
+
+Esperado: `202 Accepted`, seguido de operación `SUCCEEDED`; el riesgo queda `CANCELLED`, no se borra.
+
+### IPC, renovación, periodos y operaciones
+
+Crear una tasa ficticia (`POST /api/v1/ipc-rates`):
+
+```bash
+DOC_RATE_PERIOD="CURL-$(date +%y%m%d%H%M%S)"
+dcurl -i -X POST "$MOCK_API_URL/api/v1/ipc-rates" \
+  -H "Authorization: Bearer $API_REVIEWER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-raw "{\"reference_period\":\"$DOC_RATE_PERIOD\",\"effective_on\":\"$(date -u +%F)\",\"rate\":\"0.07500\",\"source\":\"IPC ficticio cURL\",\"is_fictional\":true}"
+```
+
+Esperado: `201 Created` con el ID de la tasa.
+
+Listar IPC (`GET /api/v1/ipc-rates`):
+
+```bash
+dcurl -i "$MOCK_API_URL/api/v1/ipc-rates" \
+  -H "Authorization: Bearer $API_READ_TOKEN"
+```
+
+Esperado: `200 OK`; la tasa semilla es ficticia y `0.08` representa 8 %.
+
+Solicitar renovación sin IPC (`POST /api/v1/policies/{policy_id}/renewals`):
+
+```bash
+dcurl -i -X POST "$MOCK_API_URL/api/v1/policies/$MOCK_POLICY_INDIVIDUAL_ID/renewals" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
+  -H 'Idempotency-Key: curl-renewal-001' \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"ipc_rate_id":null}'
+```
+
+Esperado: `202 Accepted`, estado `WAITING_INPUT`; no se usa IPC cero.
+
+Reanudar con IPC (`POST /api/v1/operations/{operation_id}/resume`):
+
+```bash
+RENEWAL_OPERATION_ID='<operation_id de la renovación anterior>'
+dcurl -i -X POST "$MOCK_API_URL/api/v1/operations/$RENEWAL_OPERATION_ID/resume" \
+  -H "Authorization: Bearer $API_REVIEWER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-raw "{\"ipc_rate_id\":\"$MOCK_IPC_RATE_ID\"}"
+```
+
+Esperado: `200 OK`, operación `PENDING`; luego consulta `GET /api/v1/operations/{operation_id}` hasta `SUCCEEDED`.
+
+Consultar periodos (`GET /api/v1/policies/{policy_id}/periods`):
+
+```bash
+dcurl -i "$MOCK_API_URL/api/v1/policies/$MOCK_POLICY_INDIVIDUAL_ID/periods" \
+  -H "Authorization: Bearer $API_READ_TOKEN"
+```
+
+Esperado tras renovar: `200 OK`, con dos periodos históricos.
+
+Consultar cualquier operación (`GET /api/v1/operations/{operation_id}`):
+
+```bash
+dcurl -i "$MOCK_API_URL/api/v1/operations/$MOCK_OPERATION_CREATE_INDIVIDUAL_ID" \
+  -H "Authorization: Bearer $API_READ_TOKEN"
+```
+
+Esperado: `200 OK` con tipo, estado, intentos y resultado si ya fue confirmado.
+
+Reconciliar la operación preparada en `NEEDS_REVIEW` (`POST /api/v1/operations/{operation_id}/reconcile`):
+
+```bash
+dcurl -i -X POST "$MOCK_API_URL/api/v1/operations/$MOCK_OPERATION_NEEDS_REVIEW_ID/reconcile" \
+  -H "Authorization: Bearer $API_REVIEWER_TOKEN"
+```
+
+Esperado: `200 OK`, estado `NEEDS_REVIEW` mientras CORE no tenga resultado. La reconciliación consulta con la misma identidad y no reenvía la mutación.
+
+### Fallos reproducibles
+
+**401**, token ausente:
+
+```bash
+dcurl -i "$MOCK_API_URL/api/v1/policies"
+```
+
+**403**, token de lectura intentando crear Party:
+
+```bash
+dcurl -i -X POST "$MOCK_API_URL/api/v1/parties" \
+  -H "Authorization: Bearer $API_READ_TOKEN" \
+  -H 'Content-Type: application/json' \
+  --data-raw '{"party_type":"PERSON","display_name":"Sin permiso","document_reference":"CURL-FORBIDDEN-001"}'
+```
+
+**404**, UUID válido que no existe:
+
+```bash
+dcurl -i "$MOCK_API_URL/api/v1/policies/00000000-0000-4000-8000-000000000000" \
+  -H "Authorization: Bearer $API_READ_TOKEN"
+```
+
+**409**, clave idempotente ya usada con el cuerpo cambiado: repite la creación individual anterior con el mismo `DOC_POLICY_KEY` y cambia el canon a `1250001.00`.
+
+```bash
+dcurl -i -X POST "$MOCK_API_URL/api/v1/policies" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
+  -H "Idempotency-Key: $DOC_POLICY_KEY" \
+  -H 'Content-Type: application/json' \
+  --data-raw "{\"policy_type\":\"INDIVIDUAL\",\"holder_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"starts_on\":\"$(date -u +%F)\",\"duration_months\":12,\"risks\":[{\"property_address\":\"Dirección cURL ficticia\",\"tenant_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"landlord_party_id\":\"$MOCK_PARTY_LANDLORD_ID\",\"monthly_rent\":\"1250001.00\"}]}"
+```
+
+**409**, cancelación del único riesgo individual:
+
+```bash
+dcurl -i -X POST "$MOCK_API_URL/api/v1/policies/$MOCK_POLICY_INDIVIDUAL_ID/risks/$MOCK_RISK_INDIVIDUAL_ID/cancellations" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
+  -H 'Idempotency-Key: curl-cancel-last-risk-001'
+```
+
+**422**, póliza individual con dos riesgos: el validador lo rechaza antes de consultar Parties.
+
+```bash
+dcurl -i -X POST "$MOCK_API_URL/api/v1/policies" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
+  -H 'Idempotency-Key: curl-invalid-individual-001' \
+  -H 'Content-Type: application/json' \
+  --data-raw "{\"policy_type\":\"INDIVIDUAL\",\"holder_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"starts_on\":\"$(date -u +%F)\",\"duration_months\":12,\"risks\":[{\"property_address\":\"A\",\"tenant_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"landlord_party_id\":\"$MOCK_PARTY_LANDLORD_ID\",\"monthly_rent\":\"100.00\"},{\"property_address\":\"B\",\"tenant_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"landlord_party_id\":\"$MOCK_PARTY_LANDLORD_ID\",\"monthly_rent\":\"100.00\"}]}"
+```
+
+**Rechazo del CORE**: la API acepta durablemente con `202`; consulta la operación y verifica `REJECTED`.
+
+```bash
+REJECT_KEY="curl-core-reject-$(date +%s)"
+dcurl -i -X POST "$MOCK_API_URL/api/v1/policies" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
+  -H "Idempotency-Key: $REJECT_KEY" \
+  -H 'X-Demo-Core-Scenario: reject' \
+  -H 'Content-Type: application/json' \
+  --data-raw "{\"policy_type\":\"INDIVIDUAL\",\"holder_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"starts_on\":\"$(date -u +%F)\",\"duration_months\":12,\"risks\":[{\"property_address\":\"Dirección rechazada ficticia\",\"tenant_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"landlord_party_id\":\"$MOCK_PARTY_LANDLORD_ID\",\"monthly_rent\":\"1000000.00\"}]}"
+```
+
+**Timeout tras aplicar**: la API acepta la operación y el worker reconcilia con la misma identidad; esperado final `SUCCEEDED` sin efecto duplicado. Los escenarios CORE solo están habilitados para demo con `DEMO_CONTROLS_ENABLED=true`.
+
+```bash
+TIMEOUT_KEY="curl-timeout-$(date +%s)"
+dcurl -i -X POST "$MOCK_API_URL/api/v1/policies" \
+  -H "Authorization: Bearer $API_OPERATOR_TOKEN" \
+  -H "Idempotency-Key: $TIMEOUT_KEY" \
+  -H 'X-Demo-Core-Scenario: timeout_after_apply' \
+  -H 'Content-Type: application/json' \
+  --data-raw "{\"policy_type\":\"INDIVIDUAL\",\"holder_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"starts_on\":\"$(date -u +%F)\",\"duration_months\":12,\"risks\":[{\"property_address\":\"Dirección timeout ficticia\",\"tenant_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"landlord_party_id\":\"$MOCK_PARTY_LANDLORD_ID\",\"monthly_rent\":\"1000000.00\"}]}"
+```
+
+Consulta el `operation_id` devuelto por `202` con `GET /api/v1/operations/{operation_id}`; debe terminar en `SUCCEEDED`.
+
+## Volúmenes, pruebas y limpieza
+
+`docker compose down` detiene la demo y conserva PostgreSQL, RabbitMQ y CORE mock. No uses `down -v` si quieres conservar esos datos.
+
+La suite aislada usa PostgreSQL, RabbitMQ, API, worker y CORE mock:
 
 ```bash
 docker compose -p policies-test -f compose.yaml -f compose.test.yaml \
   --profile test up --build --abort-on-container-exit --exit-code-from tests tests
 ```
 
-El contenedor `tests` ejecuta Ruff, formato, validación de la cadena Alembic, `alembic check` y pytest. Para detener el stack de pruebas sin borrar sus datos:
-
-```bash
-docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test down
-```
-
-Para borrar exclusivamente los volúmenes del proyecto aislado de pruebas, y solo cuando ya no necesites sus datos:
-
-```bash
-docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test down -v
-```
-
-Lint manual dentro de Docker:
-
-```bash
-docker compose --profile tools run --rm tools ruff check .
-docker compose --profile tools run --rm tools ruff format --check .
-```
-
-## Operación y limpieza
-
-```bash
-docker compose logs -f api worker outbox-relay
-docker compose down
-```
-
-`down` conserva los volúmenes de PostgreSQL, RabbitMQ y CORE mock. No uses `down -v` en el perfil local salvo que quieras borrar esos datos explícitamente.
-
-## Arquitectura y limitaciones
-
-- [Arquitectura, transiciones y diagramas](docs/architecture.md)
-- [Supuestos de negocio y limitaciones](docs/assumptions.md)
-- [Decisiones de arquitectura](docs/adr/)
-- [Instrucciones para agentes y contribución](AGENTS.md)
-
-El número de workers es por proceso. El presupuesto agregado al CORE es aproximadamente `réplicas de worker × MAX_CORE_CONCURRENCY`; no hay un límite distribuido global. El scheduler es un proceso separado y debe mantenerse como una sola instancia en Compose.
+El contenedor `tests` ejecuta Ruff, formato, validación Alembic, `alembic check` y pytest, incluido un flujo API–Outbox–RabbitMQ–worker–CORE. Cada operación devuelve `202` para indicar aceptación durable; el estado contractual se confirma consultando `/api/v1/operations/{operation_id}`.

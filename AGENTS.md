@@ -31,7 +31,7 @@ Demo backend para gestión de pólizas de arrendamiento individuales y colectiva
 
 ## Servicios y operaciones Docker
 
-- Servicios: `api`, `db`, `rabbitmq`, `worker`, `scheduler`, `outbox-relay`, `migrate`, `core-mock`, `gateway`; perfiles `demo`, `tools` y `test`.
+- Servicios: `api`, `db`, `rabbitmq`, `worker`, `scheduler`, `outbox-relay`, `migrate`, `core-mock`, `gateway` y cliente `curl`; perfiles `demo`, `tools` y `test`.
 - PostgreSQL y RabbitMQ no publican puertos al host; el mock CORE solo se resuelve dentro de Compose.
 - API y procesos de fondo esperan a `migrate` exitoso; las migraciones corren una vez como proceso finito.
 - Scheduler permanece separado y único; no escalarlo junto con la API.

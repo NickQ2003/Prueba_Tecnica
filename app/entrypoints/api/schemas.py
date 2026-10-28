@@ -103,9 +103,7 @@ class PolicyPatch(BaseModel):
 
 class RenewalCreate(BaseModel):
     model_config = ConfigDict(
-        json_schema_extra={
-            "examples": [{"ipc_rate_id": "33333333-3333-4333-8333-333333333333"}]
-        }
+        json_schema_extra={"examples": [{"ipc_rate_id": "33333333-3333-4333-8333-333333333333"}]}
     )
     ipc_rate_id: uuid.UUID | None = None
 

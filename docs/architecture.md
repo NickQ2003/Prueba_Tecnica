@@ -105,7 +105,7 @@ El lease vencido de un worker provoca una consulta al CORE con la misma identida
 
 ## Docker y capacidad
 
-API, worker, scheduler, relay, migración, seed, demo y tests usan la imagen Python fijada. PostgreSQL/RabbitMQ/CORE mock tienen servicios y healthchecks separados; el CORE mock no publica puertos. Solo gateway Nginx publica el puerto 8080. PostgreSQL y broker tienen volúmenes locales persistentes.
+API, worker, scheduler, relay, migración, seed, demo y tests usan la imagen Python fijada. Un perfil de herramientas aporta un cliente cURL en contenedor para que no haga falta instalarlo en el host. PostgreSQL/RabbitMQ/CORE mock tienen servicios y healthchecks separados; el CORE mock no publica puertos. Solo gateway Nginx publica el puerto 8080. PostgreSQL y broker tienen volúmenes locales persistentes.
 
 `/health/live` no accede a dependencias; `/health/ready` prueba PostgreSQL. `/metrics` expone contadores/latencia HTTP y gauges agregados de cantidad, antigüedad e intentos de operación por estado, sin IDs como etiquetas.
 

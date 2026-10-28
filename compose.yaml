@@ -22,14 +22,14 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: policies
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-local-only-change-me}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 5s
       timeout: 10s
       retries: 12
       start_period: 30s
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
     restart: unless-stopped
 
   core-mock:
@@ -152,7 +152,7 @@ services:
   seed:
     build: .
     profiles: [demo]
-    command: ["python", "-m", "scripts.seed"]
+    command: ["python", "-m", "scripts.mock_data"]
     environment: *app_environment
     depends_on:
       migrate:
@@ -175,6 +175,13 @@ services:
     environment: *app_environment
     depends_on:
       db:
+        condition: service_healthy
+
+  curl:
+    image: curlimages/curl:8.12.1
+    profiles: [tools]
+    depends_on:
+      gateway:
         condition: service_healthy
 
   db-test:
