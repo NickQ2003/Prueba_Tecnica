@@ -27,8 +27,8 @@ from app.entrypoints.api.schemas import (
     IpcRateCreate,
     IpcRateRead,
     OperationRead,
-    PaginatedPolicies,
     PaginatedParties,
+    PaginatedPolicies,
     PartyCreate,
     PartyRead,
     PeriodRead,
@@ -201,9 +201,7 @@ def list_parties(
         filters.append(Party.party_type == party_type)
     if search:
         term = f"%{search}%"
-        filters.append(
-            Party.display_name.ilike(term) | Party.document_reference.ilike(term)
-        )
+        filters.append(Party.display_name.ilike(term) | Party.document_reference.ilike(term))
     total = session.scalar(select(func.count()).select_from(Party).where(*filters)) or 0
     items = session.scalars(
         select(Party)

@@ -11,3 +11,8 @@ ignore = ["B008"]
 testpaths = ["tests"]
 pythonpath = ["."]
 addopts = "-ra"
+markers = [
+  "unit: fast unit tests that do not require external services",
+  "integration: PostgreSQL-backed application tests",
+  "e2e: HTTP tests that require the Compose API, broker and worker",
+]

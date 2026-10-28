@@ -28,6 +28,7 @@ def _parties(session: Session) -> tuple[Party, Party]:
     return tenant, landlord
 
 
+@pytest.mark.integration
 def test_same_key_and_payload_returns_same_durable_operation():
     with SessionLocal() as session:
         tenant, landlord = _parties(session)
@@ -66,6 +67,7 @@ def test_same_key_and_payload_returns_same_durable_operation():
         assert len(audit) == 1
 
 
+@pytest.mark.integration
 def test_same_key_with_different_request_conflicts():
     with SessionLocal() as session:
         tenant, landlord = _parties(session)

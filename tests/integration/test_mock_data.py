@@ -1,9 +1,11 @@
+import pytest
 from app.adapters.persistence.models import Operation, Party
 from app.adapters.persistence.session import SessionLocal
 from scripts.mock_data import create_mock_data
 from sqlalchemy import func, select
 
 
+@pytest.mark.integration
 def test_mock_data_creates_api_fixtures_and_is_idempotent():
     first = create_mock_data()
     second = create_mock_data()

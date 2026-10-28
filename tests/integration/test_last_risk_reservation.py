@@ -31,6 +31,7 @@ def _cancel(
             return "conflict", str(exc)
 
 
+@pytest.mark.integration
 def test_concurrent_cancellations_reserve_policy_and_protect_last_risk():
     with SessionLocal() as session:
         suffix = uuid.uuid4().hex

@@ -4,6 +4,7 @@ import uuid
 from datetime import date
 
 import httpx
+import pytest
 from app.adapters.persistence.models import NotificationDelivery, Operation, OutboxEvent
 from app.adapters.persistence.session import SessionLocal
 from sqlalchemy import select
@@ -41,6 +42,7 @@ def _notification_delivered(operation_id: str) -> bool:
         )
 
 
+@pytest.mark.e2e
 def test_confirmed_change_survives_core_response_timeout_and_reconciles():
     base_url = os.environ.get("E2E_BASE_URL")
     if not base_url:
@@ -68,9 +70,7 @@ def test_confirmed_change_survives_core_response_timeout_and_reconciles():
         )
         assert tenant.status_code == 201
         assert landlord.status_code == 201
-        listed_parties = client.get(
-            f"/api/v1/parties?search=E2E-T-{suffix}", headers=headers
-        )
+        listed_parties = client.get(f"/api/v1/parties?search=E2E-T-{suffix}", headers=headers)
         assert listed_parties.status_code == 200
         assert listed_parties.json()["total"] == 1
         created = client.post(
@@ -143,9 +143,7 @@ def test_confirmed_change_survives_core_response_timeout_and_reconciles():
         assert resumed.json()["status"] == "PENDING"
         renewal_operation_id = renewal.json()["operation_id"]
         _wait_for_operation(renewal_operation_id, "SUCCEEDED")
-        renewal_response = client.get(
-            f"/api/v1/operations/{renewal_operation_id}", headers=headers
-        )
+        renewal_response = client.get(f"/api/v1/operations/{renewal_operation_id}", headers=headers)
         assert renewal_response.status_code == 200
         renewal_operation = renewal_response.json()
         assert renewal_operation["status"] == "SUCCEEDED"

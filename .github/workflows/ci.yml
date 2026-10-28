@@ -1,33 +1,81 @@
-name: docker-ci
+name: Docker CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 jobs:
-  tests:
+  lint:
+    name: Lint and migration validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate Compose configuration
-        run: docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test config --quiet
-      - name: Build application images
-        run: docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test build
-      - name: Run lint, migration checks and tests
+      - name: Ruff lint
         run: >-
-          docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test
-          up --build --abort-on-container-exit --exit-code-from tests tests
-      - name: Start the API gateway and static UI
-        run: docker compose -p policies-ui up --build -d gateway
-      - name: Smoke test static assets and same-origin API
+          docker compose -p ci-lint --profile tools run --build --rm --no-deps
+          tools ruff check .
+      - name: Ruff format
+        run: >-
+          docker compose -p ci-lint --profile tools run --build --rm --no-deps
+          tools ruff format --check .
+      - name: Migration validation
+        run: >-
+          docker compose -p ci-lint --profile tools run --build --rm --no-deps
+          tools python scripts/check_migrations.py
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run unit tests in Docker
+        run: >-
+          docker compose -p ci-unit -f compose.yaml -f compose.test.yaml
+          --profile test run --build --rm --no-deps tests
+          pytest -p no:cacheprovider -q -m unit
+
+  integration-e2e:
+    name: PostgreSQL integration and E2E tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start test dependencies and run integration tests
+        run: >-
+          docker compose -p ci-e2e -f compose.yaml -f compose.test.yaml
+          --profile test run --build --rm tests sh -c
+          'alembic check && pytest -p no:cacheprovider -q -m "integration or e2e"'
+      - name: Stop test stack
+        if: always()
+        run: docker compose -p ci-e2e -f compose.yaml -f compose.test.yaml --profile test down
+
+  ui-smoke:
+    name: UI smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start gateway in Docker
+        run: docker compose -p ci-ui up --build -d gateway
+      - name: Check static UI and API health
         run: |
-          docker run --rm --network policies-ui_default curlimages/curl:8.12.1 --fail -sS http://gateway:8080/
-          docker run --rm --network policies-ui_default curlimages/curl:8.12.1 --fail -sS http://gateway:8080/app.js
-          docker run --rm --network policies-ui_default curlimages/curl:8.12.1 --fail -sS \
+          docker run --rm --network ci-ui_default curlimages/curl:8.12.1 \
+            --fail --silent --show-error -o /dev/null http://gateway:8080/
+          docker run --rm --network ci-ui_default curlimages/curl:8.12.1 \
+            --fail --silent --show-error -o /dev/null http://gateway:8080/app.js
+          docker run --rm --network ci-ui_default curlimages/curl:8.12.1 \
+            --fail --silent --show-error -o /dev/null \
             -H 'Authorization: Bearer demo-read-token' \
             'http://gateway:8080/api/v1/parties?limit=1'
-      - name: Stop test stacks without deleting volumes
+      - name: Stop UI stack
         if: always()
-        run: |
-          docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test down
-          docker compose -p policies-ui down
+        run: docker compose -p ci-ui down
+
+  build-main:
+    name: Build application image on main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker image
+        run: docker build --pull --tag rental-policies:${GITHUB_SHA} .

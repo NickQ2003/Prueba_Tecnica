@@ -2,12 +2,14 @@ import os
 import uuid
 from datetime import date
 
+import pytest
 from app.main import app
 from fastapi.testclient import TestClient
 
 client = TestClient(app)
 
 
+@pytest.mark.unit
 def test_policy_creation_contract_requires_exactly_one_individual_risk():
     party = str(uuid.uuid4())
     response = client.post(
@@ -40,6 +42,7 @@ def test_policy_creation_contract_requires_exactly_one_individual_risk():
     assert response.status_code == 422
 
 
+@pytest.mark.unit
 def test_policy_operation_requires_authentication():
     response = client.get("/api/v1/policies")
     assert response.status_code == 401
