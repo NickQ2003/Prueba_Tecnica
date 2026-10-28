@@ -37,6 +37,19 @@ export MOCK_API_URL=http://gateway:8080
 
 El script crea Parties sintéticas, una póliza individual, una colectiva con dos riesgos, una tasa IPC ficticia de `0.08000` (8 %) y una operación en `NEEDS_REVIEW`. Espera a que worker y relay procesen las operaciones. No resetea ni borra datos existentes; las IDs quedan cargadas como variables `MOCK_*` en esa terminal.
 
+Para imprimir solo el JSON de IDs, sin cargar variables Bash:
+
+```bash
+docker compose --profile demo run --rm seed
+```
+
+| Fixture | Datos sintéticos |
+|---|---|
+| Individual | Arrendatario Demo; canon mensual `1500000.00` COP; un riesgo. |
+| Colectiva | Administradora Demo; dos riesgos con cánones `1700000.00` y `2100000.00` COP. |
+| IPC | `DEMO-2026`, tasa `0.08000`, marcada ficticia. |
+| Reconciliación | Una solicitud con CORE no disponible que termina en `NEEDS_REVIEW`. |
+
 Ejemplo para ver IDs:
 
 ```bash
@@ -249,13 +262,13 @@ Esperado: `200 OK`, estado `NEEDS_REVIEW` mientras CORE no tenga resultado. La r
 
 ### Fallos reproducibles
 
-**401**, token ausente:
+**401**, token ausente. Esperado: `401 Unauthorized`, `{"detail":"Bearer token required"}`.
 
 ```bash
 dcurl -i "$MOCK_API_URL/api/v1/policies"
 ```
 
-**403**, token de lectura intentando crear Party:
+**403**, token de lectura intentando crear Party. Esperado: `403 Forbidden`, `{"detail":"Insufficient permission"}`.
 
 ```bash
 dcurl -i -X POST "$MOCK_API_URL/api/v1/parties" \
@@ -264,14 +277,14 @@ dcurl -i -X POST "$MOCK_API_URL/api/v1/parties" \
   --data-raw '{"party_type":"PERSON","display_name":"Sin permiso","document_reference":"CURL-FORBIDDEN-001"}'
 ```
 
-**404**, UUID válido que no existe:
+**404**, UUID válido que no existe. Esperado: `404 Not Found`, `{"detail":"policy not found"}`.
 
 ```bash
 dcurl -i "$MOCK_API_URL/api/v1/policies/00000000-0000-4000-8000-000000000000" \
   -H "Authorization: Bearer $API_READ_TOKEN"
 ```
 
-**409**, clave idempotente ya usada con el cuerpo cambiado: repite la creación individual anterior con el mismo `DOC_POLICY_KEY` y cambia el canon a `1250001.00`.
+**409**, clave idempotente ya usada con el cuerpo cambiado: repite la creación individual anterior con el mismo `DOC_POLICY_KEY` y cambia el canon a `1250001.00`. Esperado: `{"detail":"Idempotency-Key was already used with a different request"}`.
 
 ```bash
 dcurl -i -X POST "$MOCK_API_URL/api/v1/policies" \
@@ -281,7 +294,7 @@ dcurl -i -X POST "$MOCK_API_URL/api/v1/policies" \
   --data-raw "{\"policy_type\":\"INDIVIDUAL\",\"holder_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"starts_on\":\"$(date -u +%F)\",\"duration_months\":12,\"risks\":[{\"property_address\":\"Dirección cURL ficticia\",\"tenant_party_id\":\"$MOCK_PARTY_TENANT_ID\",\"landlord_party_id\":\"$MOCK_PARTY_LANDLORD_ID\",\"monthly_rent\":\"1250001.00\"}]}"
 ```
 
-**409**, cancelación del único riesgo individual:
+**409**, cancelación del único riesgo individual. Esperado: `{"detail":"the last active risk cannot be cancelled independently"}`.
 
 ```bash
 dcurl -i -X POST "$MOCK_API_URL/api/v1/policies/$MOCK_POLICY_INDIVIDUAL_ID/risks/$MOCK_RISK_INDIVIDUAL_ID/cancellations" \
@@ -289,7 +302,7 @@ dcurl -i -X POST "$MOCK_API_URL/api/v1/policies/$MOCK_POLICY_INDIVIDUAL_ID/risks
   -H 'Idempotency-Key: curl-cancel-last-risk-001'
 ```
 
-**422**, póliza individual con dos riesgos: el validador lo rechaza antes de consultar Parties.
+**422**, póliza individual con dos riesgos: el validador lo rechaza antes de consultar Parties. Esperado: JSON de validación con `status: 422` y detalle de que la póliza individual debe empezar con exactamente un riesgo.
 
 ```bash
 dcurl -i -X POST "$MOCK_API_URL/api/v1/policies" \
