@@ -1,0 +1,135 @@
+services:
+  db-test:
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+
+  migrate-test:
+    build: .
+    profiles: [test]
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://policies:local-only-change-me@db-test:5432/policies_test
+    depends_on:
+      db-test:
+        condition: service_healthy
+    restart: "no"
+
+  rabbitmq-test:
+    image: rabbitmq:4.0.5-management
+    profiles: [test]
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R rabbitmq:rabbitmq /var/lib/rabbitmq && exec /usr/local/bin/docker-entrypoint.sh rabbitmq-server"]
+    environment:
+      RABBITMQ_DEFAULT_USER: policies
+      RABBITMQ_DEFAULT_PASS: local-only-change-me
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
+
+  core-mock-test:
+    build: .
+    profiles: [test]
+    command: ["uvicorn", "app.core_mock:app", "--host", "0.0.0.0", "--port", "8081"]
+    environment:
+      CORE_MOCK_DB: /data/core-mock-test.sqlite3
+    volumes:
+      - test_core_mock_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  api-test:
+    build: .
+    profiles: [test]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://policies:local-only-change-me@db-test:5432/policies_test
+      RABBITMQ_URL: amqp://policies:local-only-change-me@rabbitmq-test:5672//
+      CORE_BASE_URL: http://core-mock-test:8081
+      API_READ_TOKEN: test-read-token
+      API_OPERATOR_TOKEN: test-operator-token
+      API_REVIEWER_TOKEN: test-reviewer-token
+      DEMO_CONTROLS_ENABLED: "true"
+    depends_on:
+      migrate-test:
+        condition: service_completed_successfully
+      rabbitmq-test:
+        condition: service_healthy
+      core-mock-test:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  worker-test:
+    build: .
+    profiles: [test]
+    command: ["celery", "-A", "app.celery_app:celery", "worker", "--loglevel=INFO", "--concurrency=1"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://policies:local-only-change-me@db-test:5432/policies_test
+      RABBITMQ_URL: amqp://policies:local-only-change-me@rabbitmq-test:5672//
+      CORE_BASE_URL: http://core-mock-test:8081
+      API_READ_TOKEN: test-read-token
+      API_OPERATOR_TOKEN: test-operator-token
+      API_REVIEWER_TOKEN: test-reviewer-token
+      DEMO_CONTROLS_ENABLED: "true"
+    depends_on:
+      migrate-test:
+        condition: service_completed_successfully
+      rabbitmq-test:
+        condition: service_healthy
+      core-mock-test:
+        condition: service_healthy
+
+  outbox-relay-test:
+    build: .
+    profiles: [test]
+    command: ["python", "-m", "app.entrypoints.workers.outbox_relay"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://policies:local-only-change-me@db-test:5432/policies_test
+      RABBITMQ_URL: amqp://policies:local-only-change-me@rabbitmq-test:5672//
+      CORE_BASE_URL: http://core-mock-test:8081
+      API_READ_TOKEN: test-read-token
+      API_OPERATOR_TOKEN: test-operator-token
+      API_REVIEWER_TOKEN: test-reviewer-token
+      DEMO_CONTROLS_ENABLED: "true"
+    depends_on:
+      migrate-test:
+        condition: service_completed_successfully
+      rabbitmq-test:
+        condition: service_healthy
+
+  tests:
+    environment:
+      DATABASE_URL: postgresql+psycopg://policies:local-only-change-me@db-test:5432/policies_test
+      E2E_BASE_URL: http://api-test:8000
+      API_OPERATOR_TOKEN: test-operator-token
+      API_READ_TOKEN: test-read-token
+      API_REVIEWER_TOKEN: test-reviewer-token
+    depends_on:
+      db-test:
+        condition: service_healthy
+      migrate-test:
+        condition: service_completed_successfully
+      api-test:
+        condition: service_healthy
+      worker-test:
+        condition: service_started
+      outbox-relay-test:
+        condition: service_started
+      rabbitmq-test:
+        condition: service_healthy
+      core-mock-test:
+        condition: service_healthy
+
+volumes:
+  test_postgres_data:
+  test_core_mock_data:

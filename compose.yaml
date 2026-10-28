@@ -1,0 +1,200 @@
+services:
+  db:
+    image: postgres:16.6-bookworm
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-policies}
+      POSTGRES_USER: ${POSTGRES_USER:-policies}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local-only-change-me}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -t 5 -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4.0.5-management
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R rabbitmq:rabbitmq /var/lib/rabbitmq && exec /usr/local/bin/docker-entrypoint.sh rabbitmq-server"]
+    environment:
+      RABBITMQ_DEFAULT_USER: policies
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-local-only-change-me}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    restart: unless-stopped
+
+  core-mock:
+    build: .
+    command: ["uvicorn", "app.core_mock:app", "--host", "0.0.0.0", "--port", "8081"]
+    environment:
+      CORE_MOCK_DB: /data/core-mock.sqlite3
+    volumes:
+      - core_mock_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://policies:local-only-change-me@db:5432/policies}
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment: &app_environment
+      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://policies:local-only-change-me@db:5432/policies}
+      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://policies:local-only-change-me@rabbitmq:5672//}
+      CORE_BASE_URL: ${CORE_BASE_URL:-http://core-mock:8081}
+      CORE_TIMEOUT_SECONDS: ${CORE_TIMEOUT_SECONDS:-2}
+      API_READ_TOKEN: ${API_READ_TOKEN:-demo-read-token}
+      API_OPERATOR_TOKEN: ${API_OPERATOR_TOKEN:-demo-operator-token}
+      API_REVIEWER_TOKEN: ${API_REVIEWER_TOKEN:-demo-reviewer-token}
+      DEMO_CONTROLS_ENABLED: ${DEMO_CONTROLS_ENABLED:-true}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      RENEWAL_DAYS_AHEAD: ${RENEWAL_DAYS_AHEAD:-30}
+      MAX_CORE_CONCURRENCY: ${MAX_CORE_CONCURRENCY:-2}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["celery", "-A", "app.celery_app:celery", "worker", "--loglevel=INFO", "--concurrency=${MAX_CORE_CONCURRENCY:-2}"]
+    environment: *app_environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+      core-mock:
+        condition: service_healthy
+    restart: unless-stopped
+
+  scheduler:
+    build: .
+    command: ["celery", "-A", "app.celery_app:celery", "beat", "--loglevel=INFO"]
+    environment: *app_environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  outbox-relay:
+    build: .
+    command: ["python", "-m", "app.entrypoints.workers.outbox_relay"]
+    environment: *app_environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  gateway:
+    image: nginx:1.27.3-alpine
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--timeout=2", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  tests:
+    build: .
+    profiles: [test]
+    command: ["sh", "-c", "ruff check . && ruff format --check . && python scripts/check_migrations.py && alembic check && pytest -p no:cacheprovider -q"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://policies:local-only-change-me@db-test:5432/policies_test
+      RABBITMQ_URL: amqp://policies:local-only-change-me@rabbitmq:5672//
+      CORE_BASE_URL: http://core-mock:8081
+      API_READ_TOKEN: test-read-token
+      API_OPERATOR_TOKEN: test-operator-token
+      API_REVIEWER_TOKEN: test-reviewer-token
+      DEMO_CONTROLS_ENABLED: "true"
+    depends_on:
+      db-test:
+        condition: service_healthy
+
+  seed:
+    build: .
+    profiles: [demo]
+    command: ["python", "-m", "scripts.seed"]
+    environment: *app_environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+      worker:
+        condition: service_started
+      outbox-relay:
+        condition: service_started
+
+  tools:
+    build: .
+    profiles: [tools]
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment: *app_environment
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db-test:
+    image: postgres:16.6-bookworm
+    profiles: [test]
+    environment:
+      POSTGRES_DB: policies_test
+      POSTGRES_USER: policies
+      POSTGRES_PASSWORD: local-only-change-me
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -t 5 -U policies -d policies_test"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 20s
+
+volumes:
+  postgres_data:
+  rabbitmq_data:
+  core_mock_data:
+  test_postgres_data:

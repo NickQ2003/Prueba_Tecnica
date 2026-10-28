@@ -1,0 +1,1 @@
+"""Rental policy management application."""
