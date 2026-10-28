@@ -7,6 +7,18 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class PartyCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "party_type": "PERSON",
+                    "display_name": "Arrendatario Demo",
+                    "document_reference": "SYNTHETIC-PERSON-001",
+                }
+            ]
+        }
+    )
+
     party_type: Literal["PERSON", "ORGANIZATION"]
     display_name: str = Field(min_length=1, max_length=160)
     document_reference: str = Field(min_length=1, max_length=80)
@@ -33,6 +45,27 @@ class RiskInput(BaseModel):
 
 
 class PolicyCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "policy_type": "INDIVIDUAL",
+                    "holder_party_id": "11111111-1111-4111-8111-111111111111",
+                    "starts_on": "2099-01-01",
+                    "duration_months": 12,
+                    "risks": [
+                        {
+                            "property_address": "Dirección ficticia 123",
+                            "tenant_party_id": "11111111-1111-4111-8111-111111111111",
+                            "landlord_party_id": "22222222-2222-4222-8222-222222222222",
+                            "monthly_rent": "1500000.00",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
     policy_type: Literal["INDIVIDUAL", "COLLECTIVE"]
     holder_party_id: uuid.UUID
     starts_on: date
@@ -69,6 +102,11 @@ class PolicyPatch(BaseModel):
 
 
 class RenewalCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"ipc_rate_id": "33333333-3333-4333-8333-333333333333"}]
+        }
+    )
     ipc_rate_id: uuid.UUID | None = None
 
 

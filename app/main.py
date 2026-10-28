@@ -2,22 +2,24 @@ import json
 import logging
 import time
 import uuid
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from app.adapters.persistence.models import (
     IpcRate,
     Operation,
+    OperationStatus,
     Party,
     Policy,
     PolicyPeriod,
     Risk,
 )
-from app.adapters.persistence.session import get_session
+from app.adapters.persistence.session import SessionLocal, get_session
 from app.application import policy_operations as use_cases
 from app.config import settings
 from app.domain.errors import ConflictError, DomainError, NotFoundError, ValidationError
@@ -44,6 +46,15 @@ logging.basicConfig(level=settings.log_level.upper(), format="%(message)s")
 logger = logging.getLogger("policy_api")
 HTTP_REQUESTS = Counter("http_requests_total", "HTTP requests", ["method", "status"])
 HTTP_LATENCY = Histogram("http_request_duration_seconds", "HTTP request duration", ["method"])
+OPERATION_COUNT = Gauge("business_operations", "Persisted operations by state", ["status"])
+OPERATION_OLDEST_AGE = Gauge(
+    "business_operation_oldest_age_seconds",
+    "Oldest operation age by state",
+    ["status"],
+)
+OPERATION_ATTEMPTS = Gauge(
+    "business_operation_attempts", "Persisted CORE attempts by operation state", ["status"]
+)
 
 app = FastAPI(
     title="Rental Policy Management API",
@@ -145,6 +156,28 @@ def health_ready(session: SessionDependency) -> dict:
 
 @app.get("/metrics", include_in_schema=False)
 def metrics() -> Response:
+    for operation_status in OperationStatus:
+        OPERATION_COUNT.labels(operation_status.value).set(0)
+        OPERATION_ATTEMPTS.labels(operation_status.value).set(0)
+        OPERATION_OLDEST_AGE.labels(operation_status.value).set(0)
+    with SessionLocal() as session:
+        stats = session.execute(
+            select(
+                Operation.status,
+                func.count(),
+                func.min(Operation.created_at),
+                func.sum(Operation.attempts),
+            ).group_by(Operation.status)
+        ).all()
+    for operation_status, count, oldest_created_at, attempts in stats:
+        OPERATION_COUNT.labels(operation_status).set(count)
+        OPERATION_ATTEMPTS.labels(operation_status).set(attempts or 0)
+        age = (
+            max(0.0, (datetime.now(UTC) - oldest_created_at).total_seconds())
+            if oldest_created_at
+            else 0.0
+        )
+        OPERATION_OLDEST_AGE.labels(operation_status).set(age)
     return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 

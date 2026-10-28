@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from app.adapters.persistence.models import IpcRate, Party
+from app.adapters.persistence.models import IpcRate, Operation, Party
 from app.adapters.persistence.session import SessionLocal
 from app.application.policy_operations import create_party, request_policy_creation
 from sqlalchemy import select
@@ -42,6 +42,17 @@ def ipc_rate() -> IpcRate:
 
 
 def queue_policy(policy_type: str, holder: Party, risks: list[dict]) -> str:
+    key = f"seed-{policy_type.lower()}-v1"
+    with SessionLocal() as session:
+        existing = session.scalar(
+            select(Operation).where(
+                Operation.consumer_scope == "synthetic-seed",
+                Operation.operation_type == "policy.create",
+                Operation.idempotency_key == key,
+            )
+        )
+        if existing:
+            return str(existing.id)
     payload = {
         "policy_type": policy_type,
         "holder_party_id": str(holder.id),
@@ -54,7 +65,7 @@ def queue_policy(policy_type: str, holder: Party, risks: list[dict]) -> str:
             session,
             payload=payload,
             consumer_scope="synthetic-seed",
-            idempotency_key=f"seed-{policy_type.lower()}-v1",
+            idempotency_key=key,
             correlation_id=f"seed-{policy_type.lower()}-v1",
             actor="synthetic-seed",
             demo_scenario="success",

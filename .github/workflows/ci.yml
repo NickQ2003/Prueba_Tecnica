@@ -1,0 +1,22 @@
+name: docker-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        run: docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test config --quiet
+      - name: Build application images
+        run: docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test build
+      - name: Run lint, migration checks and tests
+        run: >-
+          docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test
+          up --build --abort-on-container-exit --exit-code-from tests tests
+      - name: Stop test stack without deleting volumes
+        if: always()
+        run: docker compose -p policies-test -f compose.yaml -f compose.test.yaml --profile test down

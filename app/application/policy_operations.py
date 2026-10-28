@@ -270,10 +270,6 @@ def request_policy_creation(
         demo_scenario=demo_scenario,
     )
     operation.request_payload = values
-    operation.result_payload = {
-        "policy_id": str(policy_id),
-        "policy_number": values["policy_number"],
-    }
     return _commit_operation(session, operation, created)
 
 
