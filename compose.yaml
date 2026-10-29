@@ -97,7 +97,7 @@ services:
 
   scheduler:
     build: .
-    command: ["celery", "-A", "app.celery_app:celery", "beat", "--loglevel=INFO"]
+    command: ["celery", "-A", "app.celery_app:celery", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
     environment: *app_environment
     depends_on:
       migrate:
